@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>$TIBBIR Forge - Wallet Auth Test</title>
+</head>
+<body>
+    <h1>Expert Token Forge - Auth Test</h1>
+    <input type="text" id="wallet-address" placeholder="Enter wallet address" style="width:300px;">
+    <button onclick="authenticate()">Connect Wallet</button>
+    <div id="response"></div>
+
+    <script>
+        async function authenticate() {
+            const address = document.getElementById('wallet-address').value;
+            if (!address) return alert('Enter address');
+
+            const response = await fetch('http://127.0.0.1:5000/authenticate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ address })
+            });
+            const data = await response.json();
+            document.getElementById('response').innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+        }
+    </script>
+</body>
+</html>
