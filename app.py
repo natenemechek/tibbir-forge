@@ -1,5 +1,5 @@
 # -------------------------------------------------
-# app.py – Expert Token Forge (Auth + Verify + REAL MINT)
+# app.py – Tibbir Forge Backend (Auth + Mint + Staking)
 # -------------------------------------------------
 from flask import Flask, request, jsonify
 import requests
@@ -9,7 +9,9 @@ import logging
 from web3 import Web3
 from dotenv import load_dotenv
 
-# ------------------- LOAD .ENV -------------------
+# -------------------------------------------------
+# Load .env
+# -------------------------------------------------
 load_dotenv()
 
 logging.basicConfig(
@@ -18,7 +20,9 @@ logging.basicConfig(
     datefmt='%H:%M:%S'
 )
 
-# ------------------- CONFIG -------------------
+# -------------------------------------------------
+# Config
+# -------------------------------------------------
 MORALIS_KEY = os.getenv("MORALIS_KEY")
 if not MORALIS_KEY:
     raise ValueError("MORALIS_KEY not set in .env")
@@ -33,10 +37,9 @@ if not PRIVATE_KEY:
 
 app = Flask(__name__)
 
-# ------------------- RPC CONNECTION (REAL CHAIN ID = 84532) -------------------
-REAL_CHAIN_ID = 84532
-MORALIS_CHAIN_ID = "84531"  # ← Moralis still expects this
-
+# -------------------------------------------------
+# RPC (Base Sepolia – chainId 84532)
+# -------------------------------------------------
 RPC_URLS = [
     f"https://base-sepolia.g.alchemy.com/v2/{ALCHEMY_KEY}",
     "https://base-sepolia.blockpi.network/v1/rpc/public",
@@ -48,59 +51,47 @@ WEB3 = None
 for url in RPC_URLS:
     try:
         w3 = Web3(Web3.HTTPProvider(url, request_kwargs={'timeout': 10}))
-        if w3.is_connected():
-            chain_id = w3.eth.chain_id
-            if chain_id == REAL_CHAIN_ID:
-                WEB3 = w3
-                logging.info(f"Connected to Base Sepolia via: {url} (chainId: {chain_id})")
-                break
-            else:
-                logging.warning(f"Skipping RPC: wrong chain ID {chain_id} at {url}")
+        if w3.is_connected() and w3.eth.chain_id == 84532:
+            WEB3 = w3
+            logging.info(f"Connected to Base Sepolia via: {url}")
+            break
     except Exception as e:
         logging.warning(f"RPC failed ({url}): {e}")
-        continue
 
 if not WEB3:
-    raise ConnectionError(f"No RPC with chain ID {REAL_CHAIN_ID}. Check ALCHEMY_KEY.")
+    raise ConnectionError("No Base Sepolia RPC (chainId 84532) found.")
 
-# ------------------- CONTRACT & WALLET -------------------
-CONTRACT_ADDRESS = "0x61D2A8bD780d6F5a5F96F61860E562Fd0A80d00f"
+# -------------------------------------------------
+# Contracts
+# -------------------------------------------------
+# $TIBBIR ERC‑20 (replace with your token address)
+TIBBIR_ADDRESS = "0xYourTibbirToken"  # ← UPDATE THIS
 
-ABI = [
-    {
-        "inputs": [{"internalType": "address", "name": "_tibbir", "type": "address"}],
-        "stateMutability": "nonpayable",
-        "type": "constructor"
-    },
-    {
-        "inputs": [
-            {"internalType": "address", "name": "to", "type": "address"},
-            {"internalType": "string", "name": "metadata", "type": "string"},
-            {"internalType": "uint256", "name": "stakeAmount", "type": "uint256"}
-        ],
-        "name": "mint",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    }
+# Staking contract (deployed via Remix)
+STAKING_ADDRESS = "0x4ED09B156d83625dc64FFdBc86A471eb72c3B627"
+
+# Minimal ERC‑20 ABI (balanceOf, approve)
+TIBBIR_ABI = [
+    {"constant": True, "inputs": [{"name": "_owner", "type": "address"}], "name": "balanceOf", "outputs": [{"name": "balance", "type": "uint256"}], "type": "function"},
+    {"constant": False, "inputs": [{"name": "_spender", "type": "address"}, {"name": "_value", "type": "uint256"}], "name": "approve", "outputs": [{"name": "", "type": "bool"}], "type": "function"}
 ]
 
-contract = WEB3.eth.contract(address=CONTRACT_ADDRESS, abi=ABI)
+# Staking ABI (key functions)
+STAKING_ABI = [
+    {"inputs": [{"internalType": "address", "name": "_tibbir", "type": "address"}], "stateMutability": "nonpayable", "type": "constructor"},
+    {"inputs": [{"internalType": "uint256", "name": "amount", "type": "uint256"}, {"internalType": "uint256", "name": "lockMonths", "type": "uint256"}], "name": "stake", "outputs": [], "stateMutability": "nonpayable", "type": "function"},
+    {"inputs": [], "name": "unstake", "outputs": [], "stateMutability": "nonpayable", "type": "function"},
+    {"inputs": [{"internalType": "address", "name": "user", "type": "address"}], "name": "balanceOf", "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}], "stateMutability": "view", "type": "function"},
+    {"inputs": [{"internalType": "address", "name": "user", "type": "address"}], "name": "getVotingPower", "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}], "stateMutability": "view", "type": "function"}
+]
+
+tibbir = WEB3.eth.contract(address=TIBBIR_ADDRESS, abi=TIBBIR_ABI)
+staking = WEB3.eth.contract(address=STAKING_ADDRESS, abi=STAKING_ABI)
 ACCOUNT = WEB3.eth.account.from_key(PRIVATE_KEY)
 
-# ------------------- MORALIS ENDPOINTS -------------------
-ENDPOINTS = {
-    "v2": {
-        "challenge": "https://auth.moralis.io/v2/wallets/challenge/request",
-        "verify": "https://auth.moralis.io/v2/wallets/challenge/verify"
-    },
-    "v1": {
-        "challenge": "https://authapi.moralis.io/challenge/request/evm",
-        "verify": "https://authapi.moralis.io/challenge/verify/evm"
-    }
-}
-
-# ------------------- HELPERS -------------------
+# -------------------------------------------------
+# Helpers
+# -------------------------------------------------
 def validate_address(addr):
     if not addr:
         return None
@@ -109,9 +100,18 @@ def validate_address(addr):
     except:
         return None
 
-def build_moralis_payload(address):
-    return {
-        "chainId": MORALIS_CHAIN_ID,  # ← 84531 for Moralis
+# -------------------------------------------------
+# AUTHENTICATE (Moralis – chainId 84531 for auth, 84532 for tx)
+# -------------------------------------------------
+@app.route('/authenticate', methods=['POST'])
+def authenticate():
+    data = request.get_json() or {}
+    address = validate_address(data.get('address', ''))
+    if not address:
+        return jsonify({"error": "invalid address"}), 400
+
+    payload = {
+        "chainId": "84531",  # Moralis still expects 84531
         "address": address,
         "domain": "tibbirforge.bubbleapps.io",
         "uri": "https://tibbirforge.bubbleapps.io",
@@ -119,48 +119,20 @@ def build_moralis_payload(address):
         "expiration": int(time.time()) + 120
     }
 
-def build_v1_payload(address):
-    return {
-        "chainId": MORALIS_CHAIN_ID,
-        "provider": "walletconnect",
-        "address": address,
-        "domain": "tibbirforge.bubbleapps.io",
-        "uri": "https://tibbirforge.bubbleapps.io",
-        "statement": "Sign to authenticate for $TIBBIR Forge",
-        "timeout": 120
-    }
-
-# ------------------- AUTHENTICATE -------------------
-@app.route('/authenticate', methods=['POST'])
-def authenticate():
-    data = request.get_json() or {}
-    address = validate_address(data.get('address', ''))
-    if not address:
-        return jsonify({"error": "invalid or missing address"}), 400
-
     headers = {"X-API-Key": MORALIS_KEY, "Content-Type": "application/json"}
-
-    # Try v2
     try:
-        r = requests.post(
-            ENDPOINTS["v2"]["challenge"],
-            json=build_moralis_payload(address),
-            headers=headers,
-            timeout=15
-        )
+        r = requests.post("https://auth.moralis.io/v2/wallets/challenge/request", json=payload, headers=headers, timeout=15)
         if r.status_code == 201:
             return jsonify(r.json()), 201
     except:
         pass
 
-    # Try v1
+    # fallback v1
+    payload["timeout"] = 120
+    del payload["expiration"]
+    payload["provider"] = "walletconnect"
     try:
-        r = requests.post(
-            ENDPOINTS["v1"]["challenge"],
-            json=build_v1_payload(address),
-            headers=headers,
-            timeout=15
-        )
+        r = requests.post("https://authapi.moralis.io/challenge/request/evm", json=payload, headers=headers, timeout=15)
         if r.status_code == 201:
             return jsonify(r.json()), 201
         else:
@@ -168,7 +140,9 @@ def authenticate():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ------------------- VERIFY -------------------
+# -------------------------------------------------
+# VERIFY
+# -------------------------------------------------
 @app.route('/verify', methods=['POST'])
 def verify():
     data = request.get_json() or {}
@@ -181,19 +155,21 @@ def verify():
     payload = {"id": challenge_id, "signature": signature}
 
     try:
-        r = requests.post(ENDPOINTS["v2"]["verify"], json=payload, headers=headers, timeout=15)
+        r = requests.post("https://auth.moralis.io/v2/wallets/challenge/verify", json=payload, headers=headers, timeout=15)
         if r.status_code in (200, 201):
             return jsonify(r.json()), r.status_code
     except:
         pass
 
     try:
-        r = requests.post(ENDPOINTS["v1"]["verify"], json=payload, headers=headers, timeout=15)
+        r = requests.post("https://authapi.moralis.io/challenge/verify/evm", json=payload, headers=headers, timeout=15)
         return jsonify(r.json()), r.status_code
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ------------------- MINT TOKEN -------------------
+# -------------------------------------------------
+# MINT (unchanged – uses chainId 84532)
+# -------------------------------------------------
 @app.route('/mint', methods=['POST'])
 def mint_token():
     data = request.get_json() or {}
@@ -204,8 +180,8 @@ def mint_token():
         return jsonify({"error": "address and metadata_uri required"}), 400
 
     try:
-        if WEB3.eth.chain_id != REAL_CHAIN_ID:
-            return jsonify({"error": f"Wrong chain {WEB3.eth.chain_id}, need {REAL_CHAIN_ID}"}), 500
+        if WEB3.eth.chain_id != 84532:
+            return jsonify({"error": f"Wrong chain {WEB3.eth.chain_id}"}, 500)
 
         nonce = WEB3.eth.get_transaction_count(ACCOUNT.address)
         tx = contract.functions.mint(
@@ -213,21 +189,22 @@ def mint_token():
             metadata_uri,
             WEB3.to_wei(1, 'ether')
         ).build_transaction({
-            'chainId': REAL_CHAIN_ID,  # ← 84532
-            'gas': 300_000,
+            'chainId': 84532,
+            'gas': 300000,
             'gasPrice': WEB3.to_wei('0.1', 'gwei'),
             'nonce': nonce,
         })
 
-        signed_tx = WEB3.eth.account.sign_transaction(tx, PRIVATE_KEY)
-        tx_hash = WEB3.eth.send_raw_transaction(signed_tx.raw_transaction)
+        signed = WEB3.eth.account.sign_transaction(tx, PRIVATE_KEY)
+        tx_hash = WEB3.eth.send_raw_transaction(signed.raw_transaction)
         receipt = WEB3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
 
+        token_id = "unknown"
         try:
             token_id = receipt.logs[0].topics[3].hex()[-32:]
             token_id = str(int(token_id, 16))
         except:
-            token_id = "unknown"
+            pass
 
         result = {
             "status": "minted",
@@ -242,7 +219,90 @@ def mint_token():
         logging.exception("Mint failed")
         return jsonify({"error": str(e)}), 500
 
-# ------------------- RUN -------------------
+# -------------------------------------------------
+# STAKING ENDPOINTS
+# -------------------------------------------------
+@app.route('/balance', methods=['POST'])
+def balance():
+    data = request.get_json()
+    addr = validate_address(data['address'])
+    if not addr:
+        return jsonify({"error": "invalid address"}), 400
+
+    try:
+        tibbir_bal = tibbir.functions.balanceOf(addr).call() / 1e18
+        staked = staking.functions.balanceOf(addr).call() / 1e18
+        ve = staking.functions.getVotingPower(addr).call() / 1e18
+        return jsonify({"balance": tibbir_bal, "staked": staked, "veTIBBIR": ve})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/approve', methods=['POST'])
+def approve():
+    data = request.get_json()
+    addr = validate_address(data['address'])
+    amount = int(data['amount'] * 1e18)
+
+    try:
+        nonce = WEB3.eth.get_transaction_count(ACCOUNT.address)
+        tx = tibbir.functions.approve(STAKING_ADDRESS, amount).build_transaction({
+            'chainId': 84532,
+            'gas': 100000,
+            'gasPrice': WEB3.to_wei('0.1', 'gwei'),
+            'nonce': nonce,
+        })
+        signed = WEB3.eth.account.sign_transaction(tx, PRIVATE_KEY)
+        tx_hash = WEB3.eth.send_raw_transaction(signed.raw_transaction)
+        receipt = WEB3.eth.wait_for_transaction_receipt(tx_hash)
+        return jsonify({"tx_hash": tx_hash.hex()})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/stake', methods=['POST'])
+def stake():
+    data = request.get_json()
+    addr = validate_address(data['address'])
+    amount = int(data['amount'] * 1e18)
+    months = data['lock_months']
+
+    try:
+        nonce = WEB3.eth.get_transaction_count(ACCOUNT.address)
+        tx = staking.functions.stake(amount, months).build_transaction({
+            'chainId': 84532,
+            'gas': 300000,
+            'gasPrice': WEB3.to_wei('0.1', 'gwei'),
+            'nonce': nonce,
+        })
+        signed = WEB3.eth.account.sign_transaction(tx, PRIVATE_KEY)
+        tx_hash = WEB3.eth.send_raw_transaction(signed.raw_transaction)
+        receipt = WEB3.eth.wait_for_transaction_receipt(tx_hash)
+        return jsonify({"tx_hash": tx_hash.hex()})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/unstake', methods=['POST'])
+def unstake():
+    data = request.get_json()
+    addr = validate_address(data['address'])
+
+    try:
+        nonce = WEB3.eth.get_transaction_count(ACCOUNT.address)
+        tx = staking.functions.unstake().build_transaction({
+            'chainId': 84532,
+            'gas': 200000,
+            'gasPrice': WEB3.to_wei('0.1', 'gwei'),
+            'nonce': nonce,
+        })
+        signed = WEB3.eth.account.sign_transaction(tx, PRIVATE_KEY)
+        tx_hash = WEB3.eth.send_raw_transaction(signed.raw_transaction)
+        receipt = WEB3.eth.wait_for_transaction_receipt(tx_hash)
+        return jsonify({"tx_hash": tx_hash.hex()})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# -------------------------------------------------
+# Run
+# -------------------------------------------------
 if __name__ == '__main__':
-    print("Expert Token Forge API Running on http://127.0.0.1:5000")
+    print("Tibbir Forge API Running on http://127.0.0.1:5000")
     app.run(host='0.0.0.0', port=5000, debug=False)
