@@ -1,7 +1,2 @@
 flask
-web3
-requests
-python-dotenv
-streamlit
-pandas
-chardet
+gunicorn
