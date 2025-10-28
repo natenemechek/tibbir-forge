@@ -17,7 +17,7 @@ load_dotenv()
 # CONFIG
 # -------------------------------------------------
 BASE_URL = "https://tibbir-forge-production.up.railway.app"
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+ANTHROPIC_API_KEY = st.secrets["ANTHROPIC_API_KEY"]
 
 if not ANTHROPIC_API_KEY:
     st.error("ANTHROPIC_API_KEY not found in .env")
