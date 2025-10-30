@@ -1,16 +1,14 @@
 # -------------------------------------------------
-# app.py – Tibbir Forge (FULL PRODUCTION)
+# app.py – Tibbir Forge (FULL + LAZY LOAD)
 # -------------------------------------------------
 from flask import Flask, request, jsonify
-import requests
 import os
 import time
 import logging
-from web3 import Web3
 
-logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
+logging.basicConfig(level=logging.INFO)
 PORT = int(os.getenv("PORT", 5000))
 
 # Lazy load
@@ -22,6 +20,7 @@ staking = None
 def get_web3():
     global WEB3, ACCOUNT, tibbir, staking
     if WEB3 is None:
+        from web3 import Web3
         RPC_URLS = [
             f"https://base-sepolia.g.alchemy.com/v2/{os.getenv('ALCHEMY_KEY')}",
             "https://base-sepolia.blockpi.network/v1/rpc/public",
@@ -52,6 +51,7 @@ def health():
 # Authenticate
 @app.route('/authenticate', methods=['POST'])
 def authenticate():
+    import requests
     data = request.get_json() or {}
     address = data.get('address', '').strip()
     if not address:
@@ -79,6 +79,7 @@ def authenticate():
 # Verify
 @app.route('/verify', methods=['POST'])
 def verify():
+    import requests
     data = request.get_json() or {}
     challenge_id = data.get('id')
     signature = data.get('signature')
