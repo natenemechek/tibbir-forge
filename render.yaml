@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: tibbir-forge
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m waitress --host=0.0.0.0 --port=$PORT app:app
+    envVars:
+      ALCHEMY_KEY:
+        fromDatabase:
+          name: alchemy-key
+          property: value
+      PRIVATE_KEY:
+        fromDatabase:
+          name: private-key
+          property: value
+      STAKING_ADDRESS:
+        fromDatabase:
+          name: staking-address
+          property: value
+      ANTHROPIC_API_KEY:
+        fromDatabase:
+          name: anthropic-key
+          property: value
