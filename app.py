@@ -1,5 +1,5 @@
-# app.py – Tibbir Forge – USES REAL TIBBIR ON BASE MAINNET
-from flask import Flask, request, jsonify
+# app.py – Tibbir Forge – USES REAL TIBBIR ON BASE MAINNET + ROOT PAGE
+from flask import Flask, request, jsonify, render_template_string
 import os
 import logging
 from web3 import Web3
@@ -64,10 +64,10 @@ def ensure_abi_files():
         json.dump(tibbir_abi, f, indent=2)
     logging.info("RECREATED tibbir_erc20.json (18 entries)")
 
-    # YOUR STAKING ABI (9 functions)
+    # YOUR STAKING ABI (9 functions – updated for fee constructor)
     staking_abi = [
-        {"inputs": [{"internalType": "address", "name": "_tibbir", "type": "address"}], "stateMutability": "nonpayable", "type": "constructor"},
-        {"anonymous": False, "inputs": [{"indexed": True, "internalType": "address", "name": "user", "type": "address"}, {"indexed": False, "internalType": "uint256", "name": "amount", "type": "uint256"}, {"indexed": False, "internalType": "uint256", "name": "lockMonths", "type": "uint256"}], "name": "Staked", "type": "event"},
+        {"inputs": [{"internalType": "address", "name": "_tibbir", "type": "address"}, {"internalType": "address", "name": "_feeWallet", "type": "address"}], "stateMutability": "nonpayable", "type": "constructor"},
+        {"anonymous": False, "inputs": [{"indexed": True, "internalType": "address", "name": "user", "type": "address"}, {"indexed": False, "internalType": "uint256", "name": "amount", "type": "uint256"}, {"indexed": False, "internalType": "uint256", "name": "lockMonths", "type": "uint256"}, {"indexed": False, "internalType": "uint256", "name": "fee", "type": "uint256"}], "name": "Staked", "type": "event"},
         {"anonymous": False, "inputs": [{"indexed": True, "internalType": "address", "name": "user", "type": "address"}, {"indexed": False, "internalType": "uint256", "name": "amount", "type": "uint256"}], "name": "Unstaked", "type": "event"},
         {"inputs": [{"internalType": "address", "name": "user", "type": "address"}], "name": "balanceOf", "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}], "stateMutability": "view", "type": "function"},
         {"inputs": [{"internalType": "address", "name": "user", "type": "address"}], "name": "getVotingPower", "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}], "stateMutability": "view", "type": "function"},
@@ -158,6 +158,47 @@ def get_web3():
 # -------------------------------------------------
 # 5. ENDPOINTS
 # -------------------------------------------------
+@app.route('/')
+def index():
+    return render_template_string("""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Tibbir Forge — AI-Powered Staking on Base</title>
+        <style>
+            body { font-family: Arial, sans-serif; background: #f0f4f8; color: #333; text-align: center; padding: 50px; }
+            h1 { color: #1a73e8; }
+            .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
+            code { background: #eee; padding: 2px 6px; border-radius: 4px; }
+            a { color: #1a73e8; text-decoration: none; }
+            footer { margin-top: 50px; font-size: 0.9em; color: #666; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>Tibbir Forge — LIVE on Base Mainnet</h1>
+            <p>Real TIBBIR staking with 1% fee revenue, gasless transactions, and AI yield predictions.</p>
+            <p><strong>Market Cap:</strong> $335M | <strong>Chain:</strong> Base (Chain ID 8453)</p>
+            <hr>
+            <h3>API Endpoints</h3>
+            <ul style="text-align: left; display: inline-block;">
+                <li><code>GET /health</code> → Check status</li>
+                <li><code>POST /balance</code> → <code>{"address": "0x..."}</code> → Balance + staked + veTIBBIR</li>
+                <li><code>POST /ai</code> → <code>{"question": "...", "address": "0x..."}</code> → AI insights</li>
+            </ul>
+            <p><a href="https://github.com/natenemechek/tibbir-forge" target="_blank">GitHub Repo</a> • 
+               <a href="https://basescan.org/token/0xa4a2e2ca3fbfe21aed83471d28b6f65a233c6e00" target="_blank">TIBBIR on Basescan</a></p>
+            <footer>
+                <p>Future-Proof FinTech: Gasless staking via Biconomy | AI yield optimization | 1% protocol fees</p>
+                <p>Built for the next wave of DeFi — scalable, intelligent, and user-owned.</p>
+            </footer>
+        </div>
+    </body>
+    </html>
+    """), 200
+
 @app.route('/health')
 def health():
     return jsonify({"status": "healthy", "chain": "Base Mainnet", "token": "TIBBIR"}), 200
@@ -215,12 +256,17 @@ def ai_explain():
     if address:
         try:
             addr = Web3.to_checksum_address(address)
-            bal = tibbir.functions.balanceOf(addr).call() / 1e18
-            context += f"User holds {bal:.2f} TIBBIR. "
+            w3 = get_web3()
+            if w3 and tibbir:
+                bal = tibbir.functions.balanceOf(addr).call() / 1e18
+                context += f"User holds {bal:.2f} TIBBIR. "
+                if staking:
+                    staked = staking.functions.balanceOf(addr).call() / 1e18
+                    context += f"{staked:.2f} staked for veTIBBIR voting power. "
         except:
             pass
 
-    prompt = f"{context}Question: {question}\nAnswer in 2 sentences:"
+    prompt = f"{context}Question: {question}\nAnswer in 2 sentences with innovative FinTech insights:"
 
     try:
         resp = httpx.post(
