@@ -1,9 +1,8 @@
-# app.py – Tibbir Forge – REAL TIBBIR + AGENTIC PREDICTOR (NO ABI FILES)
-from flask import Flask, request, jsonify, render_template_string
+# app.py – Tibbir Forge – MINIMAL AGENTIC PREDICTOR (NO ABIs, NO FILES)
+from flask import Flask, request, jsonify
 import os
 import logging
 from web3 import Web3
-import json
 from dotenv import load_dotenv
 import httpx
 
@@ -12,91 +11,69 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
 WEB3 = None
-ACCOUNT = None
-tibbir = None
-staking = None
-
 TIBBIR_ADDRESS = "0xa4a2e2ca3fbfe21aed83471d28b6f65a233c6e00"
 
-# FULL TIBBIR ERC20 ABI (from Etherscan)
-TIBBIR_ABI = json.loads('''[
-  {"inputs":[],"stateMutability":"nonpayable","type":"constructor"},
-  {"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"owner","type":"address"},{"indexed":true,"internalType":"address","name":"spender","type":"address"},{"indexed":false,"internalType":"uint256","name":"value","type":"uint256"}],"name":"Approval","type":"event"},
-  {"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"from","type":"address"},{"indexed":true,"internalType":"address","name":"to","type":"address"},{"indexed":false,"internalType":"uint256","name":"value","type":"uint256"}],"name":"Transfer","type":"event"},
-  {"inputs":[{"internalType":"address","name":"owner","type":"address"},{"internalType":"address","name":"spender","type":"address"}],"name":"allowance","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
-  {"inputs":[{"internalType":"address","name":"spender","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"approve","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"},
-  {"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
-  {"inputs":[],"name":"decimals","outputs":[{"internalType":"uint8","name":"","type":"uint8"}],"stateMutability":"view","type":"function"},
-  {"inputs":[],"name":"name","outputs":[{"internalType":"string","name":"","type":"string"}],"stateMutability":"view","type":"function"},
-  {"inputs":[],"name":"symbol","outputs":[{"internalType":"string","name":"","type":"string"}],"stateMutability":"view","type":"function"},
-  {"inputs":[],"name":"totalSupply","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
-  {"inputs":[{"internalType":"address","name":"recipient","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"transfer","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"},
-  {"inputs":[{"internalType":"address","name":"sender","type":"address"},{"internalType":"address","name":"recipient","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"transferFrom","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"}
-]''')
-
-# STAKING ABI (your contract - paste full if different)
-STAKING_ABI = json.loads('''[
-  {"inputs":[{"internalType":"address","name":"_tibbir","type":"address"},{"internalType":"address","name":"_feeWallet","type":"address"}],"stateMutability":"nonpayable","type":"constructor"},
-  {"inputs":[{"internalType":"address","name":"user","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
-  {"inputs":[{"internalType":"address","name":"user","type":"address"}],"name":"getVotingPower","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
-  {"inputs":[{"internalType":"uint256","name":"amount","type":"uint256"},{"internalType":"uint256","name":"months","type":"uint256"}],"name":"stake","outputs":[],"stateMutability":"nonpayable","type":"function"},
-  {"inputs":[{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"unstake","outputs":[],"stateMutability":"nonpayable","type":"function"}
-]''')  # Add your full events/functions
-
 def get_web3():
-    global WEB3, ACCOUNT, tibbir, staking
+    global WEB3
     if WEB3:
         return WEB3
-
     ALCHEMY_KEY = os.getenv('ALCHEMY_KEY')
-    PRIVATE_KEY = os.getenv('PRIVATE_KEY')
-    STAKING_ADDRESS = os.getenv('STAKING_ADDRESS')
-
     if not ALCHEMY_KEY:
-        logging.error("Missing ALCHEMY_KEY")
+        logging.error("No ALCHEMY_KEY")
         return None
-
     w3 = Web3(Web3.HTTPProvider(f"https://base-mainnet.g.alchemy.com/v2/{ALCHEMY_KEY}"))
-    if not w3.is_connected():
-        return None
+    if w3.is_connected() and w3.eth.chain_id == 8453:
+        WEB3 = w3
+        logging.info("WEB3 LIVE")
+    return WEB3
 
-    if PRIVATE_KEY:
-        ACCOUNT = w3.eth.account.from_key(PRIVATE_KEY)
+@app.route('/')
+def index():
+    return "<h1>Tibbir Forge Agentic AI</h1><p>/health | /balance | /predict</p>"
 
-    global tibbir
-    tibbir = w3.eth.contract(address=w3.to_checksum_address(TIBBIR_ADDRESS), abi=TIBBIR_ABI)
+@app.route('/health')
+def health():
+    w3 = get_web3()
+    return jsonify({"status": "healthy" if w3 else "web3 down", "chain": "Base"})
 
-    if STAKING_ADDRESS:
-        global staking
-        staking = w3.eth.contract(address=w3.to_checksum_address(STAKING_ADDRESS), abi=STAKING_ABI)
-
-    WEB3 = w3
-    return w3
-
-# ... (keep your /, /health, /balance, /ai routes unchanged)
+@app.route('/balance', methods=['POST'])
+def balance():
+    data = request.get_json() or {}
+    addr = data.get('address', '')
+    if not addr:
+        return jsonify({"error": "address required"}), 400
+    try:
+        addr = Web3.to_checksum_address(addr)
+    except:
+        return jsonify({"error": "invalid address"}), 400
+    w3 = get_web3()
+    if not w3:
+        return jsonify({"error": "web3 down"}), 500
+    try:
+        bal = w3.eth.contract(address=w3.to_checksum_address(TIBBIR_ADDRESS), abi=[{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}]).functions.balanceOf(addr).call() / 1e18
+        return jsonify({"balance": bal})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/predict', methods=['POST'])
 def predict_yield():
     ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY")
     if not ANTHROPIC_KEY:
-        return jsonify({"error": "AI key missing"}), 500
-
+        return jsonify({"error": "No AI key"}), 500
     data = request.get_json() or {}
     address = data.get("address", "")
     months = data.get("months", 12)
     amount = float(data.get("amount", 0))
-
+    context = f"Stake {amount} TIBBIR for {months} months on Base. 1% fee. veBoost. TVL surging. "
     w3 = get_web3()
-    context = f"Stake {amount} TIBBIR for {months} months. 1% fee. veTIBBIR boost. Base TVL exploding. "
-    if address and w3 and tibbir:
+    if address and w3:
         try:
-            bal = tibbir.functions.balanceOf(w3.to_checksum_address(address)).call() / 1e18
-            context += f"User balance: {bal:.2f}. "
-        except Exception as e:
-            logging.warning(f"Balance fail: {e}")
-
-    prompt = f"{context}Predict APY + compounded. Agentic: Gasless auto-compound, treasury ML swaps, omnichain migration. 3 bullets."
-
+            addr = w3.to_checksum_address(address)
+            bal = w3.eth.contract(address=w3.to_checksum_address(TIBBIR_ADDRESS), abi=[{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}]).functions.balanceOf(addr).call() / 1e18
+            context += f"User has {bal:.2f} TIBBIR. "
+        except:
+            pass
+    prompt = f"{context}Predict compounded APY. Agentic FinTech: Gasless auto-restake, treasury AI swaps, omnichain yields. 3 bullets, 2030 vision."
     try:
         resp = httpx.post("https://api.anthropic.com/v1/messages", headers={
             "x-api-key": ANTHROPIC_KEY,
@@ -111,7 +88,7 @@ def predict_yield():
         answer = resp.json()["content"][0]["text"]
         return jsonify({"prediction": answer.strip(), "confidence": 9.9})
     except Exception as e:
-        logging.error(f"Claude fail: {e}")
+        logging.error(f"Claude error: {e}")
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
