@@ -1,4 +1,4 @@
-# app.py – Tibbir Forge – USES REAL TIBBIR ON BASE MAINNET + ROOT PAGE
+# app.py – Tibbir Forge TESTNET (Base Sepolia) + AI Predictor
 from flask import Flask, request, jsonify, render_template_string
 import os
 import logging
@@ -8,265 +8,120 @@ import json
 from dotenv import load_dotenv
 import httpx
 
-# -------------------------------------------------
-# 1. Load .env
-# -------------------------------------------------
 load_dotenv()
-
 app = Flask(__name__)
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+logging.basicConfig(level=logging.INFO)
 
-# -------------------------------------------------
-# 2. Global objects (lazy loaded)
-# -------------------------------------------------
 WEB3 = None
 ACCOUNT = None
 tibbir = None
 staking = None
 
-# -------------------------------------------------
-# 3. AUTO-CREATE ABI FILES
-# -------------------------------------------------
 def ensure_abi_files():
     abis_dir = Path(__file__).parent / "abis"
     abis_dir.mkdir(exist_ok=True)
+    # ... (keep your existing tibbir_erc20.json and staking.json creation)
 
-    tibbir_path = abis_dir / "tibbir_erc20.json"
-    staking_path = abis_dir / "staking.json"
-
-    # FORCE RECREATE (clean files)
-    for p in [tibbir_path, staking_path]:
-        if p.exists():
-            p.unlink()
-
-    # REAL TIBBIR ERC20 ABI (OpenZeppelin standard)
-    tibbir_abi = [
-        {"inputs": [], "stateMutability": "nonpayable", "type": "constructor"},
-        {"inputs": [{"internalType": "address", "name": "spender", "type": "address"}, {"internalType": "uint256", "name": "allowance", "type": "uint256"}, {"internalType": "uint256", "name": "needed", "type": "uint256"}], "name": "ERC20InsufficientAllowance", "type": "error"},
-        {"inputs": [{"internalType": "address", "name": "sender", "type": "address"}, {"internalType": "uint256", "name": "balance", "type": "uint256"}, {"internalType": "uint256", "name": "needed", "type": "uint256"}], "name": "ERC20InsufficientBalance", "type": "error"},
-        {"inputs": [{"internalType": "address", "name": "approver", "type": "address"}], "name": "ERC20InvalidApprover", "type": "error"},
-        {"inputs": [{"internalType": "address", "name": "receiver", "type": "address"}], "name": "ERC20InvalidReceiver", "type": "error"},
-        {"inputs": [{"internalType": "address", "name": "sender", "type": "address"}], "name": "ERC20InvalidSender", "type": "error"},
-        {"inputs": [{"internalType": "address", "name": "spender", "type": "address"}], "name": "ERC20InvalidSpender", "type": "error"},
-        {"anonymous": False, "inputs": [{"indexed": True, "internalType": "address", "name": "owner", "type": "address"}, {"indexed": True, "internalType": "address", "name": "spender", "type": "address"}, {"indexed": False, "internalType": "uint256", "name": "value", "type": "uint256"}], "name": "Approval", "type": "event"},
-        {"anonymous": False, "inputs": [{"indexed": True, "internalType": "address", "name": "from", "type": "address"}, {"indexed": True, "internalType": "address", "name": "to", "type": "address"}, {"indexed": False, "internalType": "uint256", "name": "value", "type": "uint256"}], "name": "Transfer", "type": "event"},
-        {"inputs": [{"internalType": "address", "name": "owner", "type": "address"}, {"internalType": "address", "name": "spender", "type": "address"}], "name": "allowance", "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}], "stateMutability": "view", "type": "function"},
-        {"inputs": [{"internalType": "address", "name": "spender", "type": "address"}, {"internalType": "uint256", "name": "amount", "type": "uint256"}], "name": "approve", "outputs": [{"internalType": "bool", "name": "", "type": "bool"}], "stateMutability": "nonpayable", "type": "function"},
-        {"inputs": [{"internalType": "address", "name": "account", "type": "address"}], "name": "balanceOf", "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}], "stateMutability": "view", "type": "function"},
-        {"inputs": [], "name": "decimals", "outputs": [{"internalType": "uint8", "name": "", "type": "uint8"}], "stateMutability": "view", "type": "function"},
-        {"inputs": [], "name": "name", "outputs": [{"internalType": "string", "name": "", "type": "string"}], "stateMutability": "view", "type": "function"},
-        {"inputs": [], "name": "symbol", "outputs": [{"internalType": "string", "name": "", "type": "string"}], "stateMutability": "view", "type": "function"},
-        {"inputs": [], "name": "totalSupply", "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}], "stateMutability": "view", "type": "function"},
-        {"inputs": [{"internalType": "address", "name": "to", "type": "address"}, {"internalType": "uint256", "name": "amount", "type": "uint256"}], "name": "transfer", "outputs": [{"internalType": "bool", "name": "", "type": "bool"}], "stateMutability": "nonpayable", "type": "function"},
-        {"inputs": [{"internalType": "address", "name": "from", "type": "address"}, {"internalType": "address", "name": "to", "type": "address"}, {"internalType": "uint256", "name": "amount", "type": "uint256"}], "name": "transferFrom", "outputs": [{"internalType": "bool", "name": "", "type": "bool"}], "stateMutability": "nonpayable", "type": "function"}
-    ]
-    with open(tibbir_path, "w", encoding="utf-8") as f:
-        json.dump(tibbir_abi, f, indent=2)
-    logging.info("RECREATED tibbir_erc20.json (18 entries)")
-
-    # YOUR STAKING ABI (9 functions – updated for fee constructor)
-    staking_abi = [
-        {"inputs": [{"internalType": "address", "name": "_tibbir", "type": "address"}, {"internalType": "address", "name": "_feeWallet", "type": "address"}], "stateMutability": "nonpayable", "type": "constructor"},
-        {"anonymous": False, "inputs": [{"indexed": True, "internalType": "address", "name": "user", "type": "address"}, {"indexed": False, "internalType": "uint256", "name": "amount", "type": "uint256"}, {"indexed": False, "internalType": "uint256", "name": "lockMonths", "type": "uint256"}, {"indexed": False, "internalType": "uint256", "name": "fee", "type": "uint256"}], "name": "Staked", "type": "event"},
-        {"anonymous": False, "inputs": [{"indexed": True, "internalType": "address", "name": "user", "type": "address"}, {"indexed": False, "internalType": "uint256", "name": "amount", "type": "uint256"}], "name": "Unstaked", "type": "event"},
-        {"inputs": [{"internalType": "address", "name": "user", "type": "address"}], "name": "balanceOf", "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}], "stateMutability": "view", "type": "function"},
-        {"inputs": [{"internalType": "address", "name": "user", "type": "address"}], "name": "getVotingPower", "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}], "stateMutability": "view", "type": "function"},
-        {"inputs": [{"internalType": "uint256", "name": "amount", "type": "uint256"}, {"internalType": "uint256", "name": "lockMonths", "type": "uint256"}], "name": "stake", "outputs": [], "stateMutability": "nonpayable", "type": "function"},
-        {"inputs": [], "name": "unstake", "outputs": [], "stateMutability": "nonpayable", "type": "function"},
-        {"inputs": [], "name": "tibbir", "outputs": [{"internalType": "contract IERC20", "name": "", "type": "address"}], "stateMutability": "view", "type": "function"},
-        {"inputs": [], "name": "totalStaked", "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}], "stateMutability": "view", "type": "function"}
-    ]
-    with open(staking_path, "w", encoding="utf-8") as f:
-        json.dump(staking_abi, f, indent=2)
-    logging.info("RECREATED staking.json (9 entries)")
-
-# -------------------------------------------------
-# 4. Web3 INIT – BASE MAINNET
-# -------------------------------------------------
 def get_web3():
     global WEB3, ACCOUNT, tibbir, staking
-    if WEB3 is not None:
-        return WEB3
-
-    logging.info("=== INITIALIZING WEB3 (BASE MAINNET) ===")
+    if WEB3: return WEB3
     ensure_abi_files()
 
-    ALCHEMY_KEY = os.getenv('ALCHEMY_KEY')
+    ALCHEMY_KEY = os.getenv('ALCHEMY_KEY')  # Sepolia key
     PRIVATE_KEY = os.getenv('PRIVATE_KEY')
-    STAKING_ADDRESS = os.getenv('STAKING_ADDRESS')  # Your deployed staking
+    STAKING_ADDRESS = os.getenv('STAKING_ADDRESS', '0xA274cDA0A8Dc75e0C9eC8d382ECb7506C71549b2')
+    TIBBIR_ADDRESS = os.getenv('TIBBIR_ADDRESS')  # Mock address
 
-    if not all([ALCHEMY_KEY, PRIVATE_KEY, STAKING_ADDRESS]):
-        logging.error("Missing .env: ALCHEMY_KEY, PRIVATE_KEY, STAKING_ADDRESS")
+    if not all([ALCHEMY_KEY, PRIVATE_KEY, TIBBIR_ADDRESS]):
+        logging.error("Missing env: ALCHEMY_KEY, PRIVATE_KEY, TIBBIR_ADDRESS")
         return None
 
-    # BASE MAINNET RPC
-    w3 = None
-    for url in [
-        f"https://base-mainnet.g.alchemy.com/v2/{ALCHEMY_KEY}",
-        "https://mainnet.base.org"
-    ]:
-        try:
-            cand = Web3(Web3.HTTPProvider(url, request_kwargs={'timeout': 10}))
-            if cand.is_connected() and cand.eth.chain_id == 8453:
-                w3 = cand
-                logging.info(f"Web3 CONNECTED: {url}")
-                break
-        except Exception as e:
-            logging.error(f"RPC failed: {e}")
-
-    if not w3:
+    rpc_url = f"https://base-sepolia.g.alchemy.com/v2/{ALCHEMY_KEY}"
+    w3 = Web3(Web3.HTTPProvider(rpc_url))
+    if not w3.is_connected() or w3.eth.chain_id != 84532:
+        logging.error("Not connected to Base Sepolia")
         return None
 
-    try:
-        ACCOUNT = w3.eth.account.from_key(PRIVATE_KEY)
-        logging.info(f"Account: {ACCOUNT.address}")
-    except Exception as e:
-        logging.error(f"Invalid PRIVATE_KEY: {e}")
-        return None
-
+    ACCOUNT = w3.eth.account.from_key(PRIVATE_KEY)
     base_dir = Path(__file__).parent
-    try:
-        TIBBIR_ABI = json.load(open(base_dir / "abis" / "tibbir_erc20.json"))
-        STAKING_ABI = json.load(open(base_dir / "abis" / "staking.json"))
-        logging.info(f"ABIs loaded: TIBBIR={len(TIBBIR_ABI)}, STAKING={len(STAKING_ABI)}")
-    except Exception as e:
-        logging.error(f"ABI load failed: {e}")
-        return None
+    TIBBIR_ABI = json.load(open(base_dir / "abis" / "tibbir_erc20.json"))
+    STAKING_ABI = json.load(open(base_dir / "abis" / "staking.json"))
 
-    # REAL TIBBIR – FORCE CHECKSUM (web3.py bug workaround)
-    TIBBIR_ADDRESS_RAW = "0xa4a2e2ca3fbfe21aed83471d28b6f65a233c6e00"
-    try:
-        TIBBIR_ADDRESS = w3.to_checksum_address(TIBBIR_ADDRESS_RAW)
-        tibbir = w3.eth.contract(address=TIBBIR_ADDRESS, abi=TIBBIR_ABI)
-        logging.info(f"TIBBIR attached: {TIBBIR_ADDRESS}")
-    except Exception as e:
-        logging.error(f"TIBBIR attach failed: {e}")
-        return None
+    tibbir_addr = w3.to_checksum_address(TIBBIR_ADDRESS)
+    staking_addr = w3.to_checksum_address(STAKING_ADDRESS)
 
-    # YOUR STAKING
-    try:
-        staking = w3.eth.contract(address=STAKING_ADDRESS, abi=STAKING_ABI)
-        logging.info(f"STAKING attached: {STAKING_ADDRESS}")
-    except Exception as e:
-        logging.warning(f"STAKING attach failed: {e} → using mock mode")
-        staking = None
+    global tibbir, staking
+    tibbir = w3.eth.contract(address=tibbir_addr, abi=TIBBIR_ABI)
+    staking = w3.eth.contract(address=staking_addr, abi=STAKING_ABI)
 
     WEB3 = w3
-    logging.info("=== WEB3 LIVE (BASE MAINNET) ===")
-    return WEB3
+    logging.info("WEB3 LIVE: Base Sepolia")
+    return w3
 
-# -------------------------------------------------
-# 5. ENDPOINTS
-# -------------------------------------------------
-@app.route('/')
-def index():
-    return render_template_string("""
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Tibbir Forge — AI-Powered Staking on Base</title>
-        <style>
-            body { font-family: Arial, sans-serif; background: #f0f4f8; color: #333; text-align: center; padding: 50px; }
-            h1 { color: #1a73e8; }
-            .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
-            code { background: #eee; padding: 2px 6px; border-radius: 4px; }
-            a { color: #1a73e8; text-decoration: none; }
-            footer { margin-top: 50px; font-size: 0.9em; color: #666; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>Tibbir Forge — LIVE on Base Mainnet</h1>
-            <p>Real TIBBIR staking with 1% fee revenue, gasless transactions, and AI yield predictions.</p>
-            <p><strong>Market Cap:</strong> $335M | <strong>Chain:</strong> Base (Chain ID 8453)</p>
-            <hr>
-            <h3>API Endpoints</h3>
-            <ul style="text-align: left; display: inline-block;">
-                <li><code>GET /health</code> → Check status</li>
-                <li><code>POST /balance</code> → <code>{"address": "0x..."}</code> → Balance + staked + veTIBBIR</li>
-                <li><code>POST /ai</code> → <code>{"question": "...", "address": "0x..."}</code> → AI insights</li>
-            </ul>
-            <p><a href="https://github.com/natenemechek/tibbir-forge" target="_blank">GitHub Repo</a> • 
-               <a href="https://basescan.org/token/0xa4a2e2ca3fbfe21aed83471d28b6f65a233c6e00" target="_blank">TIBBIR on Basescan</a></p>
-            <footer>
-                <p>Future-Proof FinTech: Gasless staking via Biconomy | AI yield optimization | 1% protocol fees</p>
-                <p>Built for the next wave of DeFi — scalable, intelligent, and user-owned.</p>
-            </footer>
-        </div>
-    </body>
-    </html>
-    """), 200
+# ... (keep your existing /, /health, /balance, /ai routes)
 
-@app.route('/health')
-def health():
-    return jsonify({"status": "healthy", "chain": "Base Mainnet", "token": "TIBBIR"}), 200
-
-@app.route('/balance', methods=['POST'])
-def balance():
-    data = request.get_json() or {}
-    addr = data.get('address', '').strip()
-    if not addr:
-        return jsonify({"error": "address required"}), 400
-
-    try:
-        addr = Web3.to_checksum_address(addr)
-        logging.info(f"Checksummed: {addr}")
-    except:
-        return jsonify({"error": "Invalid address"}), 400
-
-    w3 = get_web3()
-    if not w3:
-        return jsonify({"error": "Web3 not available"}), 500
-
-    try:
-        bal = tibbir.functions.balanceOf(addr).call() / 1e18
-    except Exception as e:
-        logging.error(f"TIBBIR balance failed: {e}")
-        bal = 0.0
-
-    staked = 0.0
-    ve = 0.0
-    if staking:
-        try:
-            staked = staking.functions.balanceOf(addr).call() / 1e18
-            ve = staking.functions.getVotingPower(addr).call() / 1e18
-        except Exception as e:
-            logging.warning(f"Staking call failed: {e} → returning 0")
-            staked = ve = 0.0
-
-    logging.info(f"RESULT → balance={bal:.6f}, staked={staked:.6f}, veTIBBIR={ve:.6f}")
-    return jsonify({"balance": bal, "staked": staked, "veTIBBIR": ve})
-
-@app.route('/ai', methods=['POST'])
-def ai_explain():
+@app.route('/predict', methods=['POST'])
+def predict_yield():
     ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY")
     if not ANTHROPIC_KEY:
         return jsonify({"error": "AI not configured"}), 500
 
     data = request.get_json() or {}
-    question = data.get("question", "").strip()
     address = data.get("address", "")
+    months = data.get("months", 12)
+    amount = data.get("amount", 0) or 0
 
-    if not question:
-        return jsonify({"error": "question required"}), 400
+    w3 = get_web3()
+    if not w3: return jsonify({"error": "Web3 down"}), 500
 
-    context = f"TIBBIR is a real token on Base with $335M market cap. "
+    context = f"Mock TIBBIR on Base Sepolia testnet. User stakes {amount} for {months} months. 1% fee, vePower boost. "
+    if address:
+        try:
+            addr = w3.to_checksum_address(address)
+            bal = tibbir.functions.balanceOf(addr).call() / 1e18
+            staked = staking.functions.balanceOf(addr).call() / 1e18 if staking else 0
+            context += f"Current: {bal:.2f} balance, {staked:.2f} staked. Base TVL simulations growing. "
+        except: pass
+
+    prompt = f"{context}Predict APY (5-20% test range + lock bonus). Innovative: Auto-restake via Chainlink Keepers, agentic treasury. 3 bullets."
+
+    try:
+        resp = httpx.post("https://api.anthropic.com/v1/messages", headers={
+            "x-api-key": ANTHROPIC_KEY,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json"
+        }, json={
+            "model": "claude-3-haiku-20240307",
+            "max_tokens": 200,
+            "messages": [{"role": "user", "content": prompt}]
+        }, timeout=30)
+        resp.raise_for_status()
+        answer = resp.json()["content"][0]["text"]
+        return jsonify({"prediction": answer.strip()})
+    except Exception as e:
+        logging.error(f"AI failed: {e}")
+        return jsonify({"error": "AI unavailable"}), 500
+
+@app.route('/predict', methods=['POST'])
+def predict_yield():
+    ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY")
+    if not ANTHROPIC_KEY:
+        return jsonify({"error": "AI not configured"}), 500
+
+    data = request.get_json() or {}
+    address = data.get("address", "")
+    months = data.get("months", 12)
+    amount = data.get("amount", 0)
+
+    context = f"TIBBIR on Base Mainnet. User stakes {amount} for {months} months. 1% fee, vePower boost. "
     if address:
         try:
             addr = Web3.to_checksum_address(address)
-            w3 = get_web3()
-            if w3 and tibbir:
-                bal = tibbir.functions.balanceOf(addr).call() / 1e18
-                context += f"User holds {bal:.2f} TIBBIR. "
-                if staking:
-                    staked = staking.functions.balanceOf(addr).call() / 1e18
-                    context += f"{staked:.2f} staked for veTIBBIR voting power. "
-        except:
-            pass
+            bal = tibbir.functions.balanceOf(addr).call() / 1e18
+            context += f"Current balance: {bal:.2f} TIBBIR. "
+        except: pass
 
-    prompt = f"{context}Question: {question}\nAnswer in 2 sentences with innovative FinTech insights:"
+    prompt = f"{context}Predict APY (5-20% range + lock bonus). Innovative: Auto-restake via Chainlink Keepers, agentic treasury. 3 bullets."
 
     try:
         resp = httpx.post(
@@ -278,22 +133,18 @@ def ai_explain():
             },
             json={
                 "model": "claude-3-haiku-20240307",
-                "max_tokens": 150,
+                "max_tokens": 200,
                 "messages": [{"role": "user", "content": prompt}]
             },
             timeout=30
         )
         resp.raise_for_status()
         answer = resp.json()["content"][0]["text"]
-        return jsonify({"answer": answer.strip()})
+        return jsonify({"prediction": answer.strip()})
     except Exception as e:
         logging.error(f"AI failed: {e}")
         return jsonify({"error": "AI unavailable"}), 500
 
-# -------------------------------------------------
-# 6. RUN
-# -------------------------------------------------
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
-    logging.info(f"Starting on 0.0.0.0:{port}")
     app.run(host='0.0.0.0', port=port)
